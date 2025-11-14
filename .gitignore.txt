@@ -1,0 +1,7 @@
+# Python'un oluşturduğu cache dosyaları
+__pycache__/
+*.pyc
+
+# Üretilen raporlar ve data dosyaları
+*.csv
+*.png

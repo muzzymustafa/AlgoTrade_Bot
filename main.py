@@ -219,15 +219,27 @@ def run_backtest(optimize=False):
 
     # --- Backtest/Optimizasyon ---
     if optimize:
-        # (Optimizasyon kısmı - Değişiklik yok)
+        # (Optimizasyon kısmı)
         print(f"\n--- Optimizasyon Başlatılıyor (Toplam {len(cerebro.strats)} koşu) ---")
         try:
             opt_results = cerebro.run(maxcpus=1, optreturn=True, stdstats=False, exactbars=0)
             print("\n--- Optimizasyon Tamamlandı ---")
             final_results_list = []
             print("\n--- Optimizasyon Sonuçları İşleniyor ---"); run_counter = 0
+            
+            # <--- YENİ: Toplam koşu sayısı eklendi ---
+            total_runs = len(opt_results)
+            print(f"Toplam {total_runs} kombinasyon işlenecek...")
+            # <--- BİTİŞ ---
+            
             for run_result_list in opt_results:
                 run_counter += 1
+                
+                # <--- YENİ: İlerleme Durumu Yazdır ---
+                if run_counter % 10 == 0 or run_counter == total_runs:
+                    print(f"  ... Deneme {run_counter} / {total_runs} tamamlandı.")
+                # <--- BİTİŞ ---
+                
                 try:
                     if not run_result_list: continue
                     strategy_instance = run_result_list[0]
@@ -246,7 +258,9 @@ def run_backtest(optimize=False):
                                    'WinRate_%': round(winrate, 2), 'Trades': int(total_trades), 'SQN': round(sqn_val, 2) if sqn_val is not None else None,}
                     final_results_list.append(result_dict)
                 except Exception as loop_error: print(f"!!! Çalıştırma #{run_counter} hatası: {loop_error}"); traceback.print_exc()
+            
             print(f"\nToplam {run_counter} çalıştırma işlendi."); results_df = pd.DataFrame(final_results_list)
+            
             if not results_df.empty:
                  filt = results_df.copy(); filt = filt[(filt['MaxDD_%'].notna()) & (filt['Sharpe'].notna()) & (filt['Trades'] >= 10) & (filt['MaxDD_%'] <= 35) & (filt['Sharpe'] >= 0.5)]
                  show_df = (filt if not filt.empty else results_df).sort_values(by=['NetProfit', 'MaxDD_%'], ascending=[False, True])
@@ -254,6 +268,7 @@ def run_backtest(optimize=False):
                  print("\n--- En İyi 5 ---"); print(show_df[cols].head(5).to_string(index=False))
                  results_df.to_csv('opt_results_full.csv', index=False); show_df.head(5).to_csv('opt_results_top5.csv', index=False)
                  print("\nDosyalar yazıldı: opt_results_full.csv, opt_results_top5.csv")
+                 
                  def run_single_report(fast, slow, sl, tp, tag):
                      print(f"  -> Top {tag} raporu/grafiği...")
                      cerebro2 = bt.Cerebro(stdstats=False)
