@@ -22,6 +22,7 @@ from analysis.otr import fit_otr_by_regime
 
 from strategies.ml_strategy import MlStrategy
 from strategies.baseline_sma import BaselineSmaStrategy
+from strategies.rsi_bollinger import RsiBollingerStrategy
 
 # -----------------------------------------------------------------
 # Path ayarı
@@ -343,6 +344,88 @@ def run_baseline(optimize: bool = False):
 
 
 # =================================================================
+# === RSI + BOLLINGER MODU ===
+# =================================================================
+def run_rsi(optimize: bool = False):
+    print("\n=== RSI + BOLLINGER MODU ===")
+
+    cerebro = bt.Cerebro(stdstats=not optimize)
+
+    provider = get_provider(config.DATA_SOURCE)
+    print(f"\n--- Veri Çekiliyor ({config.TIMEFRAME_TRADE}, kaynak: {provider.name()}) ---")
+    df_trade = provider.fetch_ohlcv(
+        config.SYMBOL, config.TIMEFRAME_TRADE,
+        config.TOTAL_BARS_TO_FETCH, config.BARS_PER_REQUEST,
+    )
+    if df_trade is None or df_trade.empty:
+        print("Veri çekilemedi!")
+        return
+
+    start_date = df_trade.index.min()
+    end_date = df_trade.index.max()
+
+    bt_tf, bt_comp = parse_timeframe(config.TIMEFRAME_TRADE)
+    data_feed = bt.feeds.PandasData(
+        dataname=df_trade, fromdate=start_date, todate=end_date,
+        name=config.TIMEFRAME_TRADE, timeframe=bt_tf, compression=bt_comp,
+    )
+    cerebro.adddata(data_feed)
+
+    cerebro.broker.setcash(config.START_CASH)
+    cerebro.broker.setcommission(commission=config.COMMISSION_FEE)
+    if config.USE_ATR_POSITION_SIZING:
+        cerebro.addsizer(ATRRiskSizer, risk_pct=config.RISK_PER_TRADE)
+    else:
+        cerebro.addsizer(PercentSizerFloat, percents=config.SIZER_PERCENTS)
+
+    cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trade_analyzer")
+    cerebro.addanalyzer(bt.analyzers.Returns, _name="returns")
+    cerebro.addanalyzer(bt.analyzers.DrawDown, _name="dd")
+    cerebro.addanalyzer(bt.analyzers.SharpeRatio_A, _name="sharpe",
+                        timeframe=bt_tf, compression=bt_comp, riskfreerate=0.0)
+    cerebro.addanalyzer(bt.analyzers.SQN, _name="sqn")
+
+    if optimize:
+        cerebro.optstrategy(
+            RsiBollingerStrategy,
+            rsi_period=[10, 14, 20],
+            rsi_oversold=[25, 30, 35],
+            rsi_overbought=[65, 70, 75],
+            bb_period=[15, 20, 25],
+        )
+        try:
+            opt_results = cerebro.run(maxcpus=1, optreturn=True, stdstats=False)
+            print(f"\n--- RSI+BB Optimizasyon Tamamlandı ({len(opt_results)} kombinasyon) ---")
+        except Exception as e:
+            print(f"!!! Optimizasyon hatası: {e}")
+    else:
+        cerebro.addanalyzer(EquityCurve, _name="equity")
+        cerebro.addstrategy(RsiBollingerStrategy, printlog=True)
+
+        print(f"\nBaşlangıç: {cerebro.broker.getvalue():.2f}")
+        results = cerebro.run()
+        print(f"Final: {cerebro.broker.getvalue():.2f}")
+
+        strat = results[0]
+        metrics = _extract_metrics(cerebro, strat)
+
+        eq = strat.analyzers.equity.get_analysis()
+        dates = mdates.date2num(eq["datetimes"])
+        values = eq["equity"]
+
+        plt.figure(figsize=(10, 4))
+        plt.plot_date(dates, values, "-", label="Equity")
+        plt.xlabel("Tarih")
+        plt.ylabel("Portföy Değeri")
+        plt.title(f"RSI+BB – {config.SYMBOL} Equity Eğrisi")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+        return metrics
+
+
+# =================================================================
 # === ML MODU: mevcut MlStrategy + K-Means + Meta-Labeler + OTR ===
 # =================================================================
 def run_ml(optimize: bool = False, full_backtest: bool = False):
@@ -627,8 +710,8 @@ def main():
         "--mode",
         type=str,
         default="baseline",
-        choices=["baseline", "ml"],
-        help="Çalışma modu: 'baseline' (sade SMA) veya 'ml' (ML stratejisi)",
+        choices=["baseline", "ml", "rsi"],
+        help="Çalışma modu: 'baseline' (SMA), 'ml' (ML), 'rsi' (RSI+Bollinger)",
     )
     parser.add_argument(
         "--optimize",
@@ -787,6 +870,8 @@ def main():
         )
     elif args.mode == "baseline":
         run_baseline(optimize=args.optimize)
+    elif args.mode == "rsi":
+        run_rsi(optimize=args.optimize)
     else:
         run_ml(optimize=args.optimize, full_backtest=args.full_backtest)
 
