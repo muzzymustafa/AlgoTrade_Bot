@@ -659,6 +659,11 @@ def main():
         help="config.SYMBOLS listesindeki tüm sembolleri sırayla çalıştır",
     )
     parser.add_argument(
+        "--walk-forward",
+        action="store_true",
+        help="Walk-forward optimization (rolling window OOS test)",
+    )
+    parser.add_argument(
         "--paper",
         action="store_true",
         help="Paper trading modu (sanal para ile canlı sinyal)",
@@ -676,6 +681,41 @@ def main():
         config.SYMBOL = args.symbol
     if args.source:
         config.DATA_SOURCE = args.source
+
+    # Walk-Forward Optimization
+    if args.walk_forward:
+        from utils.walk_forward import run_walk_forward
+
+        provider = get_provider(config.DATA_SOURCE)
+        print(f"\n--- Walk-Forward: Veri çekiliyor ({config.SYMBOL}) ---")
+        df_trade = provider.fetch_ohlcv(
+            config.SYMBOL, config.TIMEFRAME_TRADE,
+            config.TOTAL_BARS_TO_FETCH, config.BARS_PER_REQUEST,
+        )
+        if df_trade is None or df_trade.empty:
+            print("Veri çekilemedi!")
+            sys.exit(1)
+
+        bt_tf, bt_comp = parse_timeframe(config.TIMEFRAME_TRADE)
+
+        param_grid = {
+            "fast_period": config.OPT_TRADE_FAST_SMA,
+            "slow_period": config.OPT_TRADE_SLOW_SMA,
+            "stop_loss": config.OPT_STOP_LOSS,
+            "take_profit": config.OPT_TAKE_PROFIT,
+        }
+
+        run_walk_forward(
+            strategy_cls=BaselineSmaStrategy,
+            df_trade=df_trade,
+            param_grid=param_grid,
+            train_bars=50000,
+            test_bars=10000,
+            bt_tf=bt_tf,
+            bt_comp=bt_comp,
+            optimize_metric="sharpe",
+        )
+        sys.exit(0)
 
     # Live/Paper trading modu
     if args.paper or args.live:
