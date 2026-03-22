@@ -150,3 +150,11 @@ SYMBOLS = [
         'filter_trading_hours': False,
     },
 ]
+
+# -----------------------------------------------------------------
+# --- Live/Paper Trading Ayarları ---
+# -----------------------------------------------------------------
+LIVE_POLL_INTERVAL = 60          # saniye — veri çekme aralığı
+LIVE_WARMUP_BARS = 300           # indikatör ısınması için çekilecek bar
+LIVE_STATE_DIR = 'data'          # state JSON dizini
+LIVE_LOG_DIR = 'logs'            # trade log dizini

@@ -658,6 +658,16 @@ def main():
         action="store_true",
         help="config.SYMBOLS listesindeki tüm sembolleri sırayla çalıştır",
     )
+    parser.add_argument(
+        "--paper",
+        action="store_true",
+        help="Paper trading modu (sanal para ile canlı sinyal)",
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Canlı trading modu (gerçek emir — Binance)",
+    )
 
     args = parser.parse_args()
 
@@ -666,6 +676,66 @@ def main():
         config.SYMBOL = args.symbol
     if args.source:
         config.DATA_SOURCE = args.source
+
+    # Live/Paper trading modu
+    if args.paper or args.live:
+        from live.engine import TradingEngine
+        from live.signal_generator import SignalGenerator
+        from live.paper_broker import PaperBroker
+
+        # yfinance ile live trading engellenmiş
+        if args.live and getattr(config, "DATA_SOURCE", "binance") == "yfinance":
+            print("HATA: yfinance sembollerinde canlı trading yapılamaz. --paper kullanın.")
+            sys.exit(1)
+
+        # Signal generator
+        sig_gen = SignalGenerator(
+            trade_fast_sma=config.TRADE_FAST_SMA,
+            trade_slow_sma=config.TRADE_SLOW_SMA,
+            trend_fast_sma=config.TREND_FAST_SMA,
+            trend_slow_sma=config.TREND_SLOW_SMA,
+            adx_min=getattr(config, "ADX_MIN", 20),
+            atr_period=getattr(config, "ATR_PERIOD", 14),
+            min_cross_strength=getattr(config, "MIN_CROSS_STRENGTH", 0.25),
+            cooldown_bars=getattr(config, "COOL_DOWN_BARS", 12),
+            stop_loss=config.STOP_LOSS,
+            take_profit=config.TAKE_PROFIT,
+            allow_short=True,
+            filter_trading_hours=getattr(config, "FILTER_TRADING_HOURS", True),
+        )
+
+        # Broker
+        if args.live:
+            from live.live_broker import LiveBroker
+            broker = LiveBroker(sandbox=True)  # varsayılan testnet
+        else:
+            broker = PaperBroker(cash=config.START_CASH, commission=config.COMMISSION_FEE)
+
+        # Provider
+        provider = get_provider(config.DATA_SOURCE)
+
+        # State dosya yolu
+        safe_symbol = config.SYMBOL.replace("/", "_").replace(".", "_")
+        mode_tag = "live" if args.live else "paper"
+        state_path = os.path.join(
+            getattr(config, "LIVE_STATE_DIR", "data"),
+            f"state_{safe_symbol}_{mode_tag}.json",
+        )
+
+        engine = TradingEngine(
+            broker=broker,
+            signal_gen=sig_gen,
+            provider=provider,
+            symbol=config.SYMBOL,
+            timeframe_trade=config.TIMEFRAME_TRADE,
+            timeframe_trend=config.TIMEFRAME_TREND,
+            state_path=state_path,
+            poll_interval=getattr(config, "LIVE_POLL_INTERVAL", 60),
+            warmup_bars=getattr(config, "LIVE_WARMUP_BARS", 300),
+            risk_per_trade=config.RISK_PER_TRADE,
+        )
+        engine.run()
+        sys.exit(0)
 
     # Multi-symbol modu
     if args.multi:
