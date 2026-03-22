@@ -29,7 +29,7 @@ COMMISSION_FEE = 0.001      # tek yön komisyon (örn. 10 bps = 0.001)
 SLIPPAGE_BPS = 2            # tek yön slippage (2 bps = 0.0002 fiyat çarpanı)
 SIZER_PERCENTS = 20         # PercentSizer için yüzde (güvenli fallback)
 USE_ATR_POSITION_SIZING = True
-RISK_PER_TRADE = 0.005      # bakiyenin %0.5’i risk/işlem (ATR tabanlı sizing)
+RISK_PER_TRADE = 0.02       # bakiyenin %2’si risk/işlem (ATR tabanlı sizing)
 
 # -----------------------------------------------------------------
 # --- Strateji Parametreleri (ML modundaki SMA Cross) ---
