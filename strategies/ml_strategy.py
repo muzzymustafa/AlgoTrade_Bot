@@ -1,32 +1,14 @@
-# === ml_strategy.py (v38) ===
+# === ml_strategy.py (v39) ===
 import backtrader as bt
 from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
 import backtrader.indicators as btind
 import pandas as pd
 import numpy as np
-import warnings, os, csv
+import warnings
+import os
+import csv
 from datetime import datetime
-
-warnings.filterwarnings("ignore")
-
-
-# ==============================================================
-#            Güvenli SMA (Backfill ve warmup dostu)
-# ==============================================================
-class SafeSMA(bt.Indicator):
-    lines = ("sma",)
-    params = (("period", 10),)
-    plotinfo = dict(plot=False)
-
-    def __init__(self):
-        self.addminperiod(int(self.p.period))
-
-    def next(self):
-        n = int(self.p.period)
-        s = 0.0
-        for i in range(n):
-            s += float(self.data.close[-i])
-        self.lines.sma[0] = s / n
 
 
 # ==============================================================
@@ -58,6 +40,7 @@ class MlStrategy(bt.Strategy):
         ("entry_atr_mult", 0.35),        # stop-entry uzaklığı
         ("swing_lookback", 9),           # swing HL aralığı
         ("entry_timeout_bars", 18),      # ~1.5 saat
+        ("filter_trading_hours", True),  # crypto=True, hisse=False
         ("trade_start_hour", 6),         # UTC
         ("trade_end_hour", 22),
 
@@ -116,11 +99,11 @@ class MlStrategy(bt.Strategy):
         self.pending_entry = False        # stop-entry bekleniyor mu?
 
         # İndikatörler
-        self.trade_fast = SafeSMA(self.data_trade, period=int(self.p.trade_fast_sma))
-        self.trade_slow = SafeSMA(self.data_trade, period=int(self.p.trade_slow_sma))
+        self.trade_fast = bt.indicators.SMA(self.data_trade.close, period=int(self.p.trade_fast_sma))
+        self.trade_slow = bt.indicators.SMA(self.data_trade.close, period=int(self.p.trade_slow_sma))
         self.trade_crossover = btind.CrossOver(self.trade_fast, self.trade_slow)
-        self.trend_fast = SafeSMA(self.data_trend, period=int(self.p.trend_fast_sma))
-        self.trend_slow = SafeSMA(self.data_trend, period=int(self.p.trend_slow_sma))
+        self.trend_fast = bt.indicators.SMA(self.data_trend.close, period=int(self.p.trend_fast_sma))
+        self.trend_slow = bt.indicators.SMA(self.data_trend.close, period=int(self.p.trend_slow_sma))
         self.adx = btind.AverageDirectionalMovementIndex(self.data_trade, period=int(self.p.adx_period))
         self.atr = btind.ATR(self.data_trade, period=int(self.p.atr_period))
         self.trade_ret = bt.indicators.PercentChange(self.data_trade.close, period=1)
@@ -178,22 +161,30 @@ class MlStrategy(bt.Strategy):
         else:
             return price * (1.0 + self.p.stop_loss), price * (1.0 - self.p.take_profit)
 
-    def get_arima_forecast(self) -> bool:
+    def get_arima_forecast(self) -> int:
+        """
+        ARIMA tahmin yönü: +1 (bullish), -1 (bearish), 0 (filtre yok/hata).
+        """
         try:
             if not self.p.arima_enabled:
-                return True
+                return 0  # filtre kapalı, her yöne izin ver
             look = int(self.p.arima_lookback)
             steps = int(self.p.arima_forecast_steps)
             arr = list(self.data_trade.close.get(size=look))
             if len(arr) < look:
-                return False
+                return 0
             model = ARIMA(arr, order=self.p.arima_order)
-            fit = model.fit()
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=ConvergenceWarning)
+                fit = model.fit()
             fc = fit.forecast(steps=steps)
-            return float(fc[-1]) > float(arr[-1])
+            if float(fc[-1]) > float(arr[-1]):
+                return 1
+            else:
+                return -1
         except Exception as e:
             self.log(f"ARIMA hata: {e}")
-            return False
+            return 0
 
     def _confirm_cross(self) -> int:
         """
@@ -244,8 +235,8 @@ class MlStrategy(bt.Strategy):
                     w.writerow(["event", "fast", "slow", "datetime", "equity"])
                 w.writerow(["START", int(self.p.trade_fast_sma), int(self.p.trade_slow_sma),
                             self.data_trade.datetime.datetime(0).isoformat(), f"{self.broker.getvalue():.2f}"])
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Progress CSV yazma hatası: {e}")
 
     def stop(self):
         try:
@@ -253,8 +244,8 @@ class MlStrategy(bt.Strategy):
                 w = csv.writer(f)
                 w.writerow(["STOP", int(self.p.trade_fast_sma), int(self.p.trade_slow_sma),
                             self.data_trade.datetime.datetime(0).isoformat(), f"{self.broker.getvalue():.2f}"])
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"Progress CSV stop yazma hatası: {e}")
         # Export
         try:
             self._export_trades_excel()
@@ -418,10 +409,11 @@ class MlStrategy(bt.Strategy):
             len(self.trade_rv30) < 30):
             return
 
-        # Saat filtresi
+        # Saat filtresi (hisse senetleri için kapatılabilir)
         dt_now = self.data_trade.datetime.datetime(0)
-        if not (int(self.p.trade_start_hour) <= dt_now.hour <= int(self.p.trade_end_hour)):
-            return
+        if self.p.filter_trading_hours:
+            if not (int(self.p.trade_start_hour) <= dt_now.hour <= int(self.p.trade_end_hour)):
+                return
 
         # açık emir varsa (SL/TP/exit) — ama entry emirleri için ayrıca kontrol var
         if self.order and (self.order is not self.entry_order):
@@ -556,7 +548,8 @@ class MlStrategy(bt.Strategy):
 
         # LONG sinyal: stop-buy
         if (cross_dir > 0) and is_long_trend and reg_ok and not self.pending_entry:
-            if not self.get_arima_forecast():
+            arima_dir = self.get_arima_forecast()
+            if arima_dir == -1:  # bearish tahmin, long'a aykırı
                 return
             proba = 1.0
             if self.p.use_meta and self.p.meta_model is not None:
@@ -582,9 +575,8 @@ class MlStrategy(bt.Strategy):
 
         # SHORT sinyal: stop-sell
         if self.p.allow_short and (cross_dir < 0) and is_short_trend and reg_ok and not self.pending_entry:
-            if not self.get_arima_forecast():
-                # arima_enabled ise False dönerse short açmak için tersini kullanıyorduk;
-                # v38: ARIMA filtreyi "True ise devam" şeklinde tek kapı olarak tutuyoruz.
+            arima_dir = self.get_arima_forecast()
+            if arima_dir == 1:  # bullish tahmin, short'a aykırı
                 return
             proba = 1.0
             if self.p.use_meta and self.p.meta_model is not None:

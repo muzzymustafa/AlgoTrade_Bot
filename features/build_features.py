@@ -1,5 +1,8 @@
 # features/build_features.py (v32)
 # -*- coding: utf-8 -*-
+# DEPRECATED: Bu modül eski bir versiyondur.
+# Canonical versiyon: utils/feature_extractor.py (build_features, add_kmeans_features)
+# Bu dosya geriye uyumluluk için tutulmaktadır.
 
 from __future__ import annotations
 import numpy as np

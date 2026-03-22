@@ -1,5 +1,8 @@
-# ml/kmeans_regime.py (v32)
+# features/kmeans_regime.py (v32)
 # -*- coding: utf-8 -*-
+# DEPRECATED: Bu modül eski bir versiyondur.
+# Canonical versiyon: utils/regime_model.py (get_regime_labels, analyze_regimes)
+# Bu dosya geriye uyumluluk için tutulmaktadır.
 
 from __future__ import annotations
 import numpy as np

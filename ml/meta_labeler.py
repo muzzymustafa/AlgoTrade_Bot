@@ -48,7 +48,8 @@ class MetaLabeler:
             imp = pd.Series(self.clf.feature_importances_, index=self.features).sort_values(ascending=False)
             print("[MetaLabeler] Model eğitildi. Özellik Önemleri (Top 5):")
             print(imp.head(5).to_string())
-        except: pass
+        except Exception as e:
+            print(f"[MetaLabeler] Özellik önem hesabı hatası: {e}")
         
         return self
 
