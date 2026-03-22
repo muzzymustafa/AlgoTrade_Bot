@@ -154,6 +154,14 @@ SYMBOLS = [
 # -----------------------------------------------------------------
 # --- Live/Paper Trading Ayarları ---
 # -----------------------------------------------------------------
+# -----------------------------------------------------------------
+# --- Portföy Bazlı Risk Limitleri ---
+# -----------------------------------------------------------------
+MAX_DAILY_LOSS_PCT = 0.03        # günlük max kayıp: bakiyenin %3'ü
+MAX_OPEN_POSITIONS = 3           # eşzamanlı max açık pozisyon
+MAX_CONSECUTIVE_LOSSES = 5       # ardışık kayıp sonrası dur (cooldown)
+DAILY_LOSS_COOLDOWN_HOURS = 4    # günlük limit aşılırsa bekleme süresi
+
 LIVE_POLL_INTERVAL = 60          # saniye — veri çekme aralığı
 LIVE_WARMUP_BARS = 300           # indikatör ısınması için çekilecek bar
 LIVE_STATE_DIR = 'data'          # state JSON dizini

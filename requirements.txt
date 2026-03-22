@@ -10,4 +10,6 @@ scipy>=1.11
 yfinance>=0.2.31
 requests>=2.28
 pandas_ta>=0.3.14
+streamlit>=1.30
+plotly>=5.18
 pytest>=7.0

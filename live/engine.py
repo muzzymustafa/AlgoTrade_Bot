@@ -18,6 +18,49 @@ from utils.data_provider import DataProvider
 logger = logging.getLogger(__name__)
 
 
+class RiskManager:
+    """Portföy bazlı risk limitleri."""
+
+    def __init__(self):
+        self.daily_pnl = 0.0
+        self.consecutive_losses = 0
+        self.last_reset_date = None
+        self.cooldown_until = None
+
+    def reset_daily(self):
+        today = datetime.utcnow().date()
+        if self.last_reset_date != today:
+            self.daily_pnl = 0.0
+            self.last_reset_date = today
+
+    def record_trade(self, pnl: float):
+        self.daily_pnl += pnl
+        if pnl < 0:
+            self.consecutive_losses += 1
+        else:
+            self.consecutive_losses = 0
+
+    def can_trade(self, equity: float) -> tuple[bool, str]:
+        """Trade izni kontrolü. (True, '') veya (False, 'neden')."""
+        self.reset_daily()
+
+        # Günlük kayıp limiti
+        max_loss = equity * getattr(config, "MAX_DAILY_LOSS_PCT", 0.03)
+        if abs(self.daily_pnl) > max_loss and self.daily_pnl < 0:
+            return False, f"Günlük kayıp limiti aşıldı ({self.daily_pnl:.2f})"
+
+        # Ardışık kayıp limiti
+        max_consec = getattr(config, "MAX_CONSECUTIVE_LOSSES", 5)
+        if self.consecutive_losses >= max_consec:
+            return False, f"Ardışık {self.consecutive_losses} kayıp — cooldown"
+
+        # Cooldown
+        if self.cooldown_until and datetime.utcnow() < self.cooldown_until:
+            return False, f"Cooldown: {self.cooldown_until}"
+
+        return True, ""
+
+
 class TradingEngine:
     """
     Canlı/Paper trading döngüsü.
@@ -60,6 +103,7 @@ class TradingEngine:
         self._running = False
         self.state = State()
         self.tick_count = 0
+        self.risk_mgr = RiskManager()
 
     def run(self):
         """Ana döngüyü başlat."""
@@ -160,6 +204,14 @@ class TradingEngine:
                         self._close_position(position, current_price, exit_reason)
 
                 else:
+                    # Risk kontrolü
+                    can_trade, risk_reason = self.risk_mgr.can_trade(equity)
+                    if not can_trade:
+                        if self.tick_count % 10 == 0:  # her 10 tick'te bir logla
+                            print(f"  [Risk] {risk_reason}")
+                        time.sleep(self.poll_interval)
+                        continue
+
                     # Giriş sinyali
                     sig = self.signal_gen.get_signal(
                         indicators, current_regime,
@@ -267,6 +319,7 @@ class TradingEngine:
         self.notifier.send(msg)
         print(f"  <<< {msg}")
 
+        self.risk_mgr.record_trade(pnl)
         self.state.reset_position()
         self.state.trade_count += 1
 
